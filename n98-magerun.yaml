@@ -1,0 +1,6 @@
+autoloaders:
+  TSchifftner: %module%/src
+
+commands:
+  customCommands:
+    - TSchifftner\Order\Setstatus\CompleteCommand
