@@ -35,8 +35,11 @@ class CompleteCommand extends AbstractMagentoCommand
 
         /** @var Mage_Sales_Model_Resource_Order_Collection $orderCollection */
         $orderCollection = Mage::getResourceModel('sales/order_collection')
-            ->addAttributeToFilter('status', array('nin' => array(self::ORDER_STATUS)));
-
+            ->addAttributeToFilter('status', array('nin' => array(
+                Mage_Sales_Model_Order::STATE_COMPLETE,
+                Mage_Sales_Model_Order::STATE_CANCELED,
+                Mage_Sales_Model_Order::STATE_HOLDED,
+            )));
 
         // filter order collection by increment ids
         if($input->getOption('increment-ids')) {
