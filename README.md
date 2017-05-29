@@ -37,6 +37,13 @@ Every order has to be confirmed manually if ```--config-all``` is not set.
 To limit the orders you can specify single, comma separated and ranges of increment ids. You can even combine those like ```--increment-ids=100004215,100004219,100004227-100004238```
 
 
+### Generate project helper ###
+
+Project helper allow to easily install Projects. _This works for prepared projects on aws s3 only._
+
+    $ n98-magerun.phar project:helper:create
+
+
 Credits due where credits due
 --------
 
