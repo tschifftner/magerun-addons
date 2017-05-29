@@ -4,3 +4,4 @@ autoloaders:
 commands:
   customCommands:
     - TSchifftner\Order\Setstatus\CompleteCommand
+    - TSchifftner\Project\Helper\CreateCommand
