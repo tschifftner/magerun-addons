@@ -41,6 +41,10 @@ function cleanup {
     $PROJECTSTORAGE/$PROJECT/bin/deploy/cleanup.sh -r $RELEASE_FOLDER
 }
 
+function create-admin {
+    cd $RELEASE_FOLDER/current/htdocs && ../tools/n98-magerun.phar admin:user:create dev dev@ambimax.de test Test User
+}
+
 function info {
     echo "Project: $PROJECT"
     echo "Environemnt: $ENVIRONMENT"
@@ -100,7 +104,7 @@ echo -e "
 
 
     \e[0;32mcreate-admin \e[0m
-    Creates dev admin with password 'test'
+    Creates admin user 'dev' with password 'test'
 
     \e[0;32msetup \e[0m
     Initial setup full project
