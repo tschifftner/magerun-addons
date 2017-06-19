@@ -13,16 +13,16 @@ BUILD_FILE="${buildFile}"
 
 # Magento deployment default functions
 function fullsync {
-    aws s3 cp $S3BUCKET/$PROJECT/backup/production/database/created.txt $PROJECTSTORAGE/$PROJECT/backup/production/database/created.txt
-    aws s3 cp $S3BUCKET/$PROJECT/backup/production/files/created.txt $PROJECTSTORAGE/$PROJECT/backup/production/files/created.txt
-    aws s3 sync --delete $S3BUCKET/$PROJECT/backup/production $PROJECTSTORAGE/$PROJECT/backup/production
+    #aws s3 cp $S3BUCKET/$PROJECT/backup/production/database/created.txt $PROJECTSTORAGE/$PROJECT/backup/production/database/created.txt
+    #aws s3 cp $S3BUCKET/$PROJECT/backup/production/files/created.txt $PROJECTSTORAGE/$PROJECT/backup/production/files/created.txt
+    aws s3 sync --exact-timestamps --delete $S3BUCKET/$PROJECT/backup/production $PROJECTSTORAGE/$PROJECT/backup/production
 }
 
 function fastsync {
-    aws s3 cp $S3BUCKET/$PROJECT/backup/production/database/created.txt $PROJECTSTORAGE/$PROJECT/backup/production/database/created.txt
-    aws s3 cp $S3BUCKET/$PROJECT/backup/production/files/created.txt $PROJECTSTORAGE/$PROJECT/backup/production/files/created.txt
-    aws s3 sync --delete $S3BUCKET/$PROJECT/backup/production/database $PROJECTSTORAGE/$PROJECT/backup/production/database
-    aws s3 sync --delete --exclude "import/*" --exclude "catalog/*" $S3BUCKET/$PROJECT/backup/production/files $PROJECTSTORAGE/$PROJECT/backup/production/files
+    #aws s3 cp $S3BUCKET/$PROJECT/backup/production/database/created.txt $PROJECTSTORAGE/$PROJECT/backup/production/database/created.txt
+    #aws s3 cp $S3BUCKET/$PROJECT/backup/production/files/created.txt $PROJECTSTORAGE/$PROJECT/backup/production/files/created.txt
+    aws s3 sync --exact-timestamps --delete $S3BUCKET/$PROJECT/backup/production/database $PROJECTSTORAGE/$PROJECT/backup/production/database
+    aws s3 sync --exact-timestamps --delete --exclude "import/*" --exclude "catalog/*" $S3BUCKET/$PROJECT/backup/production/files $PROJECTSTORAGE/$PROJECT/backup/production/files
 }
 
 function reindex {
