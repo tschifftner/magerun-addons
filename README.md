@@ -43,6 +43,11 @@ Project helper allow to easily install Projects. _This works for prepared projec
 
     $ n98-magerun.phar project:helper:create
 
+Requirements for a workable helper:
+ - Update bash on Mac `brew install bash`
+ - Define bucket in ~/.n98-magerun.yml `s3bucket: 's3://bucket'`
+ - Define credentials in ~/.aws
+ 
 
 Credits due where credits due
 --------
