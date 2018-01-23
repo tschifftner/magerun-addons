@@ -12,6 +12,7 @@ PROJECTSTORAGE="${projectstorage}"
 BUILD_FILE="${buildFile}"
 ROOT="${root}"
 HOSTS="${hosts}"
+MAGENTO_ROOT="${magentoRoot}"
 
 DATABASE_NAME="${databaseName}"
 DATABASE_HOST="${databaseHost}"
@@ -20,7 +21,7 @@ DATABASE_PASSWORD="${databasePassword}"
 
 # No configuration required
 RELEASE_FOLDER="${ROOT}/releases"
-MAGENTO_ROOT="${RELEASE_FOLDER}/current/htdocs"
+#MAGENTO_ROOT="${RELEASE_FOLDER}/current/htdocs"
 PRODUCTION_BACKUP="${PROJECTSTORAGE}/${PROJECT}/backup/production"
 S3_PRODUCTION_BACKUP="${BUCKET}/${PROJECT}/backup/production"
 MAGENTO_DEPLOYSCRIPTS="${PROJECTSTORAGE}/${PROJECT}/bin/deploy"
@@ -36,6 +37,8 @@ NC='\033[0m' # No Color
 MAX_AGE=86400
 NOW=`date +%s`
 VERSION="2.0.0"
+
+APACHE_CONFIG=/usr/local/etc/httpd
 
 function error_exit {
     echo
@@ -54,6 +57,10 @@ function run {
     ${@}
 }
 
+function run_mysql {
+    echo "mysql -e \"${@}\""
+    `which mysql` -e "${@}"
+}
 #
 # Available commands
 #
@@ -72,6 +79,7 @@ function info {
 
 function install {
     echo_step "Start installation"
+    if [ ! -d ${MAGENTO_DEPLOYSCRIPTS} ]; then error_exit "Magento Deployscripts not found"; fi
     run cd ${MAGENTO_DEPLOYSCRIPTS} && run git pull || error_exit "Unable to update magento-deployscripts"
     run ${MAGENTO_DEPLOYSCRIPTS}/deploy.sh -e $ENVIRONMENT -r $BUILD_FILE -t ${ROOT} -d || error_exit "Magento deployment failed"
 }
@@ -115,8 +123,36 @@ function version {
 #
 
 function brew:install:apache {
-    brew install apache2
-    brew services start apache2
+#    brew install apache2
+#    brew services start apache2
+
+    run sudo apachectl stop || echo ""
+    run sudo launchctl unload -w /System/Library/LaunchDaemons/org.apache.httpd.plist 2>/dev/null || echo "Cannot unload autostart of httpd"
+
+    if [ -d /usr/local/Cellar/httpd ]; then
+        run brew reinstall httpd24 --with-privileged-ports --with-http2 || error_exit "Reinstallation of httpd24 failed"
+    else
+        run brew install httpd24 --with-privileged-ports --with-http2 || error_exit "Installation of httpd24 failed"
+    fi
+
+    VERSION=`cd /usr/local/Cellar/httpd && ls -dt * | head -n 1`
+    run sudo cp -v /usr/local/Cellar/httpd/${VERSION}/homebrew.mxcl.httpd.plist /Library/LaunchDaemons || error_exit "Cannod copy lunch daemon"
+    run sudo chown -v root:wheel /Library/LaunchDaemons/homebrew.mxcl.httpd.plist || error_exit "Cannot set permissions on lunch daemon"
+    run sudo chmod -v 644 /Library/LaunchDaemons/homebrew.mxcl.httpd.plist || error_exit "Cannot set permissions on lunch daemon"
+
+    setup:apache
+
+    run sudo launchctl load /Library/LaunchDaemons/homebrew.mxcl.httpd.plist || error_exit "Cannot load lunch daemon"
+}
+
+function brew:install:dnsmasq {
+    brew install dnsmasq
+    addToFileIfMissing "^address=\/\.dev" "address=/.dev/127.0.0.1" /usr/local/etc/dnsmasq.conf
+    addToFileIfMissing "^address=\/\.local" "address=/.local/127.0.0.1" /usr/local/etc/dnsmasq.conf
+
+    sudo mkdir -v /etc/resolver
+    sudo bash -c 'echo "nameserver 127.0.0.1" > /etc/resolver/dev'
+    sudo brew services start dnsmasq
 }
 
 function brew:install:bash-completion {
@@ -129,18 +165,39 @@ function brew:install:mariadb {
     brew install mariadb
     brew services start mariadb
 
-    addToFileIfMissing "[client]" ~/.my.cnf
+    addToFileIfMissing "^\[client\]" "[client]" ~/.my.cnf
     addToFileIfMissing "^user" "user=root" ~/.my.cnf
     addToFileIfMissing "^password" "password=" ~/.my.cnf
 }
 
-function brew:install:php {
-    brew unlink php56 || echo ""
-    brew unlink php71 || echo ""
-    brew unlink php56 || echo ""
-    brew install php70
+function _installPhp {
+    version=$1
+    run brew unlink php56 || echo ""
+    run brew unlink php70 || echo ""
+    run brew unlink php71 || echo ""
+
+    if [ -f /usr/local/opt/php${version}/bin/php ]; then
+        run brew reinstall php${version} --with-apache
+        run brew reinstall --build-from-source php${version}-opcache php${version}-apcu php${version}-mcrypt php${version}-imagick php${version}-pdo-dblib php${version}-yaml php${version}-xdebug php${version}-intl
+    else
+        run brew install php${version} --with-apache
+        run brew install --build-from-source php${version}-opcache php${version}-apcu php${version}-mcrypt php${version}-imagick php${version}-pdo-dblib php${version}-yaml php${version}-xdebug php${version}-intl
+    fi
 
     setup:php-ini
+    run brew link php${version} || error_exit "Unable to link php${version}"
+}
+
+function brew:install:php56 {
+    _installPhp 5.6
+}
+
+function brew:install:php70 {
+    _installPhp 70
+}
+
+function brew:install:php71 {
+    _installPhp 71
 }
 
 
@@ -173,8 +230,13 @@ function reset:config {
 function reset:db {
     echo_step "Start database reset"
     if [ -z $DATABASE_NAME ]; then error_exit "No database name set"; fi
-    run gzip -dc ${PRODUCTION_BACKUP}/database/combined_dump.sql.gz | mysql $DATABASE_NAME || error_exit "Unable to import original database"
-    reset:config
+    echo "gzip -dc ${PRODUCTION_BACKUP}/database/combined_dump.sql.gz | mysql $DATABASE_NAME"
+    run $(`which gzip` -dc ${PRODUCTION_BACKUP}/database/combined_dump.sql.gz | `which mysql` $DATABASE_NAME) || error_exit "Unable to import original database"
+
+    # Reset config only when magento root folder exists
+    if [ -d ${MAGENTO_ROOT} ]; then
+        reset:config
+    fi
 }
 
 
@@ -184,31 +246,74 @@ function reset:db {
 
 function setup:apache
 {
-    GROUP=$(id -g -n $USER)
-    run sudo chown -R $USER:$GROUP /etc/apache2/ || error_exit "Cannot set permissions on /etc/apache2/"
-    run mkdir -p /etc/apache2/vhosts || error_exit "Cannot create vhost dir"
+    FILE=/usr/local/etc/httpd/httpd.conf
 
-    FILE=/etc/apache2/httpd.conf
+    if [ ! -f $FILE ]; then
+        brew:install:apache
+    fi
+
+    run sudo mkdir -p ${APACHE_CONFIG}/users || error_exit "Cannot create users dir"
+    run sudo mkdir -p ${APACHE_CONFIG}/vhosts || error_exit "Cannot create vhost dir"
+    run sudo mkdir -p /private/var/log/apache2 || error_exit "Cannot create log dir"
+
+    GROUP=$(id -g -n $USER)
+    run sudo chown -R $USER:$GROUP ${APACHE_CONFIG} || error_exit "Cannot set permissions on ${APACHE_CONFIG}"
+    run sudo chown -R $USER:$GROUP /var/log/apache2 || error_exit "Cannot set permissions on /var/log/apache2"
+    run sudo chown -R $USER:$GROUP /Library/WebServer || error_exit "Cannot set permissions on /Library/WebServer"
+
+    LIBPHP=/usr/local/opt/php70/libexec/apache2/libphp7.so
+    if [ ! -f ${LIBPHP} ]; then
+        brew:install:php
+    fi
+
+    echo "<Directory "/Users/$USER/">
+AllowOverride All
+Options Indexes MultiViews FollowSymLinks
+Require all granted
+</Directory>" > ${APACHE_CONFIG}/users/$USER.conf
+
+
+#    if [ ! -f "$FILE.original" ]; then
+#        cp $FILE ${FILE}.original
+#    fi
+    cp -f ${FILE}.default $FILE
+
+    VERSION=`cd /usr/local/Cellar/httpd && ls -dt * | head -n 1`
+    MODULES_DIR=/usr/local/Cellar/httpd/${VERSION}/lib/httpd/modules
 
     addToFileIfMissing "# Custom Settings" $FILE
-    addToFileIfMissing "LoadModule authz_core_module libexec/apache2/mod_authz_core.so" $FILE
-    addToFileIfMissing "LoadModule authz_host_module libexec/apache2/mod_authz_host.so" $FILE
-    addToFileIfMissing "LoadModule userdir_module libexec/apache2/mod_userdir.so" $FILE
-    addToFileIfMissing "LoadModule include_module libexec/apache2/mod_include.so" $FILE
-    addToFileIfMissing "LoadModule rewrite_module libexec/apache2/mod_rewrite.so" $FILE
-    addToFileIfMissing "LoadModule deflate_module libexec/apache2/mod_deflate.so" $FILE
-    addToFileIfMissing "LoadModule expires_module libexec/apache2/mod_expires.so" $FILE
-    addToFileIfMissing "LoadModule php5_module libexec/apache2/libphp5.so" $FILE
+    addToFileIfMissing "ServerName localhost" $FILE
+    addToFileIfMissing "Listen 0.0.0.0:80" $FILE
+    addToFileIfMissing "User $USER" $FILE
+    addToFileIfMissing "Group $GROUP" $FILE
+    addToFileIfMissing "^LoadModule authz_core_module" "LoadModule authz_core_module ${MODULES_DIR}/mod_authz_core.so" $FILE
+    addToFileIfMissing "^LoadModule authz_host_module" "LoadModule authz_host_module ${MODULES_DIR}/mod_authz_host.so" $FILE
+    addToFileIfMissing "LoadModule userdir_module ${MODULES_DIR}/mod_userdir.so" $FILE
+    addToFileIfMissing "LoadModule include_module ${MODULES_DIR}/mod_include.so" $FILE
+    addToFileIfMissing "LoadModule rewrite_module ${MODULES_DIR}/mod_rewrite.so" $FILE
+    addToFileIfMissing "LoadModule deflate_module ${MODULES_DIR}/mod_deflate.so" $FILE
+    addToFileIfMissing "LoadModule http2_module ${MODULES_DIR}/mod_http2.so" $FILE
+    addToFileIfMissing "LoadModule expires_module ${MODULES_DIR}/mod_expires.so" $FILE
+    addToFileIfMissing "LoadModule vhost_alias_module ${MODULES_DIR}/mod_vhost_alias.so" $FILE
+    addToFileIfMissing "^LoadModule php7_module" "LoadModule php7_module ${LIBPHP}" $FILE
 
-    addToFileIfMissing "^Include /etc/apache2/vhosts/\*.conf" "Include /etc/apache2/vhosts/*.conf" $FILE
+    addToFileIfMissing "^IncludeOptional ${APACHE_CONFIG}/users/\*.conf" "IncludeOptional ${APACHE_CONFIG}/users/*.conf" $FILE
+    addToFileIfMissing "^IncludeOptional ${APACHE_CONFIG}/vhosts/\*.conf" "IncludeOptional ${APACHE_CONFIG}/vhosts/*.conf" $FILE
+    addToFileIfMissing "^<FilesMatch \.php\$>" "<FilesMatch \.php$>
+    SetHandler application/x-httpd-php
+</FilesMatch>" $FILE
+
+    run apachectl -t || error_exit "Wrong apache2 configuration"
+    run sudo apachectl stop || echo ""
+    run sudo apachectl start || error_exit "Unable to start apache2"
 }
 
 
 function setup:apache:vhost
 {
     echo_step "Setup Apache Vhost"
-    run mkdir -p /etc/apache2/vhosts || error_exit "Cannot create vhost dir"
-    echo "${VHOST_TPL}" > /etc/apache2/vhosts/${PROJECT}-${ENVIRONMENT}.conf || error_exit "Cannot write vhost template"
+    run mkdir -p ${APACHE_CONFIG}/vhosts || error_exit "Cannot create vhost dir"
+    echo "${VHOST_TPL}" > ${APACHE_CONFIG}/vhosts/${PROJECT}-${ENVIRONMENT}.conf || error_exit "Cannot write vhost template"
     run apachectl -t || error_exit "Wrong apache2 configuration"
     run sudo apachectl restart || error_exit "Unable to restart apache2"
 }
@@ -221,14 +326,14 @@ function setup:cleanup {
 function setup:database
 {
     echo_step "Setup database"
-    run mysql -e "create database if not exists ${DATABASE_NAME};" || error_exit "Creation of database failed"
+    run_mysql "create database if not exists ${DATABASE_NAME};" || error_exit "Creation of database failed $?"
 
     if [[ -z $DATABASE_PASSWORD ]]; then
-        run mysql -e "GRANT ALL PRIVILEGES ON ${DATABASE_NAME}.* TO ${DATABASE_USERNAME}@'${DATABASE_HOST}';" || error_exit "Unable to grant mysql permissions"
+        run_mysql "GRANT ALL PRIVILEGES ON ${DATABASE_NAME}.* TO ${DATABASE_USERNAME}@'${DATABASE_HOST}';" || error_exit "Unable to grant mysql permissions"
     else
-        run mysql -e "GRANT ALL PRIVILEGES ON ${DATABASE_NAME}.* TO ${DATABASE_USERNAME}@'${DATABASE_HOST}' IDENTIFIED BY '${DATABASE_PASSWORD}';" || error_exit "Unable to grant mysql permissions"
+        run_mysql "GRANT ALL PRIVILEGES ON ${DATABASE_NAME}.* TO ${DATABASE_USERNAME}@'${DATABASE_HOST}' IDENTIFIED BY '${DATABASE_PASSWORD}';" || error_exit "Unable to grant mysql permissions"
     fi
-    run mysql -e "FLUSH PRIVILEGES;" || error_exit "Unable to flush mysql privileges"
+    run_mysql "FLUSH PRIVILEGES;" || error_exit "Unable to flush mysql privileges"
 }
 
 function setup:deployscripts {
@@ -429,8 +534,11 @@ else
     _format "bew"
     _format "brew:install:apache" "Installs apache2 on mac"
     _format "brew:install:bash-completion" "Installs bash-completion on mac"
+    _format "brew:install:dnsmasq" "Installs dnsmasq on mac"
     _format "brew:install:mariadb" "Installs mariadb on mac"
-    _format "brew:install:php" "Installs php 7.0 on mac"
+    _format "brew:install:php56" "Installs php 5.6 on mac"
+    _format "brew:install:php70" "Installs php 7.0 on mac"
+    _format "brew:install:php71" "Installs php 7.1 on mac"
 
     _format "create"
     _format "create:admin" "Creates admin user 'dev' with password 'test'"
@@ -442,7 +550,7 @@ else
 
     _format "setup"
     _format "setup:apache" "Setup Apache"
-    _format "setup:apache:vhost" "Setup Apache Vhost to /etc/apache2/vhosts/"
+    _format "setup:apache:vhost" "Setup Apache Vhost to ${APACHE_CONFIG}/vhosts/"
     _format "setup:cleanup" "Removes old installed builds from releases folder"
     _format "setup:database" "Setup database"
     _format "setup:deployscripts" "Installs/Updates magento-deployscripts"

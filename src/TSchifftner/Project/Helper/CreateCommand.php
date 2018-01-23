@@ -39,6 +39,10 @@ class CreateCommand extends AbstractMagentoCommand
                 'magentoRoot', null, InputOption::VALUE_OPTIONAL,
                 'Define magento root folder path (default is $HOME/www/$project/$environment/releases/current/htdocs)'
             )
+            ->addOption(
+                'publicFolder', null, InputOption::VALUE_OPTIONAL,
+                'Define public folder (default is htdocs)'
+            )
             ->addOption('build_file', null, InputOption::VALUE_OPTIONAL, 'Build file name')
             ->setDescription('Create project helper');
     }
@@ -72,10 +76,14 @@ class CreateCommand extends AbstractMagentoCommand
         $this->loadProjectConfig($config, $project, $environment);
 
         // define
-        $bucket = $this->getConfig('bucket', $this->getConfig('s3bucket'));
-        $projectstorage = $this->getConfig('projectstorage', '$HOME/projectstorage');
-        $root = $this->getConfig('root', "\$HOME/www/${project}/${environment}");
-        $magentoRoot = $this->getConfig('magentoRoot', "\$HOME/www/${project}/${environment}/releases/current/htdocs");
+        $bucket = $this->getProjectConfig('bucket', $this->getConfig('s3bucket'));
+        $projectstorage = $this->getProjectConfig('projectstorage', '$HOME/projectstorage');
+        $root = $this->getProjectConfig('root', "\$HOME/www/${project}/${environment}");
+        $publicFolder = $this->getProjectConfig('publicFolder', 'htdocs');
+        $magentoRoot = $this->getProjectConfig(
+            'magentoRoot',
+            "\$HOME/www/${project}/${environment}/releases/current/${publicFolder}"
+        );
         $buildFile = $this->getConfig('build_file', "${bucket}/${project}/builds/${project}.tar.gz");
 
         if ( $input->getOption('bucket') ) {
@@ -100,6 +108,7 @@ class CreateCommand extends AbstractMagentoCommand
             '${bucket}'         => $bucket,
             '${projectstorage}' => $projectstorage,
             '${root}'           => $root,
+            '${publicFolder}'   => $publicFolder,
             '${magentoRoot}'    => $magentoRoot,
             '${buildFile}'      => $buildFile,
             '${hosts}'          => implode(" ", $this->getProjectConfig('hosts', ["${project}.local"])),
@@ -147,7 +156,9 @@ class CreateCommand extends AbstractMagentoCommand
      */
     public function getProjectConfig($key, $default = null)
     {
-        return $this->getConfig($key, $default, $this->_projectConfig);
+        $value = $this->getConfig($key, null, $this->_projectConfig);
+
+        return $value ? $value : $this->getConfig($key, $default);
     }
 
     /**
