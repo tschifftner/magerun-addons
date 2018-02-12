@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Helper for $project ($environment)
+# Helper for ${project} (${environment})
 #
 # @author Tobias Schifftner, @tschifftner, ambimax® GmbH
 # @copyright © 2017
@@ -176,13 +176,26 @@ function _installPhp {
     run brew unlink php70 || echo ""
     run brew unlink php71 || echo ""
 
+    # blackfire-php${version}-zts php${version}-soap blackfire-php${version}
+
+    PHP_INSTALL_PARAMS=install
     if [ -f /usr/local/opt/php${version}/bin/php ]; then
-        run brew reinstall php${version} --with-apache
-        run brew reinstall --build-from-source php${version}-opcache php${version}-apcu php${version}-mcrypt php${version}-imagick php${version}-pdo-dblib php${version}-yaml php${version}-xdebug php${version}-intl
-    else
-        run brew install php${version} --with-apache
-        run brew install --build-from-source php${version}-opcache php${version}-apcu php${version}-mcrypt php${version}-imagick php${version}-pdo-dblib php${version}-yaml php${version}-xdebug php${version}-intl
+        PHP_INSTALL_PARAMS=reinstall
     fi
+
+    run brew $PHP_INSTALL_PARAMS php${version} --with-httpd --build-from-source \
+        php${version}-igbinary \
+        php${version}-redis \
+        php${version}-oauth \
+        php${version}-solr \
+        php${version}-opcache \
+        php${version}-apcu \
+        php${version}-mcrypt \
+        php${version}-imagick \
+        php${version}-pdo-dblib \
+        php${version}-yaml \
+        php${version}-xdebug \
+        php${version}-intl || error_exit "Unable to ${PHP_INSTALL_PARAMS} php${version}"
 
     setup:php-ini
     run brew link php${version} || error_exit "Unable to link php${version}"
@@ -198,6 +211,46 @@ function brew:install:php70 {
 
 function brew:install:php71 {
     _installPhp 71
+}
+
+function brew:xdebug:enable {
+    echo_step "Enable xdebug"
+    _enableDisableXdebug true
+    echo "xdebug enabled"
+}
+
+function brew:xdebug:disable {
+    echo_step "Disable xdebug"
+    _enableDisableXdebug false
+    echo "xdebug disabled"
+}
+
+function _enableDisableXdebug {
+    enable=${1:false}
+    FILES=`find /usr/local/etc/ -name 'ext-xdebug.ini'`
+    for f in $FILES
+    do
+        if [ "$enable" = true ]; then
+            run sed -i.default "s/^;zend_extension=/zend_extension=/" $f
+        else
+            run sed -i.default "s/^zend_extension=/;zend_extension=/" $f
+        fi
+    done
+    brew:php:restart
+}
+
+function brew:php:start {
+    echo_step "Start apache/php"
+    run sudo apachectl start
+}
+function brew:php:stop {
+    echo_step "Stop apache/php"
+    sudo apachectl stop
+}
+
+function brew:php:restart {
+    echo_step "Restart apache/php"
+    run sudo apachectl restart
 }
 
 
@@ -539,6 +592,12 @@ else
     _format "brew:install:php56" "Installs php 5.6 on mac"
     _format "brew:install:php70" "Installs php 7.0 on mac"
     _format "brew:install:php71" "Installs php 7.1 on mac"
+
+    _format "brew:xdebug:enable" "Enable xdebug extension"
+    _format "brew:xdebug:disable" "Disable xdebug extension"
+    _format "brew:php:start" "Start php"
+    _format "brew:php:stop" "Stop php"
+    _format "brew:php:restart" "Restart php"
 
     _format "create"
     _format "create:admin" "Creates admin user 'dev' with password 'test'"
