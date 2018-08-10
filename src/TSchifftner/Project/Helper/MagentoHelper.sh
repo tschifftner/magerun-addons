@@ -283,8 +283,8 @@ function reset:config {
 function reset:db {
     echo_step "Start database reset"
     if [ -z $DATABASE_NAME ]; then error_exit "No database name set"; fi
-    echo "gzip -dc ${PRODUCTION_BACKUP}/database/combined_dump.sql.gz | mysql $DATABASE_NAME"
-    run $(`which gzip` -dc ${PRODUCTION_BACKUP}/database/combined_dump.sql.gz | `which mysql` $DATABASE_NAME) || error_exit "Unable to import original database"
+    echo "gzip -dc ${PRODUCTION_BACKUP}/database/combined_dump.sql.gz | mysql -h $DATABASE_HOST -u$DATABASE_USERNAME -p"$DATABASE_PASSWORD" $DATABASE_NAME"
+    run $(`which gzip` -dc ${PRODUCTION_BACKUP}/database/combined_dump.sql.gz | `which mysql` -h $DATABASE_HOST -u$DATABASE_USERNAME -p"$DATABASE_PASSWORD" $DATABASE_NAME) || error_exit "Unable to import original database"
 
     # Reset config only when magento root folder exists
     if [ -d ${MAGENTO_ROOT} ]; then
@@ -314,9 +314,9 @@ function setup:apache
     run sudo chown -R $USER:$GROUP /var/log/apache2 || error_exit "Cannot set permissions on /var/log/apache2"
     run sudo chown -R $USER:$GROUP /Library/WebServer || error_exit "Cannot set permissions on /Library/WebServer"
 
-    LIBPHP=/usr/local/opt/php70/libexec/apache2/libphp7.so
+    LIBPHP=/usr/local/opt/php70/lib/httpd/modules/libphp7.so
     if [ ! -f ${LIBPHP} ]; then
-        brew:install:php
+        brew:install:php70
     fi
 
     echo "<Directory "/Users/$USER/">
